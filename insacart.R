@@ -22,6 +22,8 @@ library(factoextra)
 library(NbClust)
 library(dbscan)
 library(fpc)
+library(tidyr)
+library(tidyverse)
 
 set.seed(1)
 
@@ -213,7 +215,7 @@ aisle.token.table=aisle.token.table[order(aisle.token.table, decreasing=T)]
 # we can filter them out along with some others when we get to the analysis part.
 # however, we only want to ilter out the non-nouns
 # we use NLP tagging to ffind all the non-nouns in the descriptor 
-top=tolower(names(aisle.token.table))
+top=data.frame(word=tolower(names(aisle.token.table)), freq=as.vector(aisle.token.table))
 
 annotate.word=function(word){
   temp=annotate(word, list(Maxent_Sent_Token_Annotator(), Maxent_Word_Token_Annotator()))
@@ -223,8 +225,9 @@ annotate.word=function(word){
   return(tags)
 }
 
-tags=annotate.word(top)
-top=data.frame(word=top, tags=tags)
+tags=annotate.word(top$word)
+top=cbind(top, tags)
+top=top[order(top$freq, decreasing=T),]
 # since the NLP tags are not perfect (orange got tagged as adj but we do have some oranges in produce), we manually filter
 
 top[which(top$word%in%c('pack', 'style', 'flavor', 'mix','light','blend','size','ct','mini','oz')),'tags']='JJ'
@@ -236,7 +239,7 @@ topJJ=topJJ[1:50,]
 aisle.token.table=subset(aisle.token.table, names(aisle.token.table)%in%topJJ$word)
 png(filename="product_name_cloud.png",width=1920, height=1080)
 par(bg="black")
-wordcloud(words=names(aisle.token.table), freq=aisle.token.table, scale=c(10,-1), rot.per=F, random.order=F, use.r.layout=T, colors=brewer.pal(8,"Accent"), random.color=F) #top words
+wordcloud(words=topJJ$word, freq=topJJ$freq, scale=c(10,-1), rot.per=F, random.order=F, use.r.layout=T, colors=brewer.pal(8,"Accent"), random.color=F) #top words
 dev.off()
 
 
@@ -535,7 +538,11 @@ name.cluster=function(data){
   data=data[order(data, decreasing=T)[1:3]]
   data=paste(names(data), collapse=' ')
   return(data.frame(cluster.name=data, cluster.size=cluster.size))
-  }
+}
+
+
+test=filter(products.clust, clusters==202)
+name.cluster2(test)
 
 products.clust=products%>%group_by(aisle_id)%>%group_modify(~cluster.prod(.x))
 products.clust$clusters=products.clust$clusters+100*products.clust$aisle_id
@@ -555,13 +562,16 @@ write.csv(cluster.freq, 'cluster.csv', row.names=F)
 
 transactions=inner_join(order_pp[c('order_id','product_id')], products.clust[c('product_id','clusters')], by='product_id')
 transactions=transactions[,-which(names(transactions)=='product_id')]
-write.csv(transactions, 'order_transactions.csv', row.names=F)
+outlier.products=clusters[which(clusters$prop>quantile(clusters$prop, 0.95)),'clusters']
+transactions=filter(transactions, !clusters%in%outlier.products)
+transactions=format_csv(transactions)
+conn=textConnection(object=transactions)
+transactions=read.transactions(conn, 'single', cols=c("order_id","clusters"), header=T, sep = ",")
 
 
-transactions=read.transactions('order_transactions.csv', 'single', cols=c("order_id","clusters"), header=T, sep = ",")
-supp.max=outlier.range(clusters$prop)[2]
+##transactions=read.transactions('order_transactions.csv', 'single', cols=c("order_id","clusters"), header=T, sep = ",")
 supp.min=quantile(clusters$prop, 0.5)
-test.arules=apriori(transactions, parameter = list(supp=supp.min, smax = supp.max, conf = 0.2, target = "rules"))
+test.arules=apriori(transactions, parameter = list(supp=supp.min, conf = 0.2, target = "rules"))
 arules.frame=DATAFRAME(test.arules)
 
 
@@ -583,3 +593,4 @@ outlier.products=as.character(outlier.products[1:100,'clusters'])
 
 arules.frame=arules.frame[which(!sapply(arules.frame$LHS, string_in, patterns=outlier.products)),]
 arules.frame=arules.frame[which(!sapply(arules.frame$RHS, string_in, patterns=outlier.products)),]
+
