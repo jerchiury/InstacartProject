@@ -3,8 +3,8 @@ title: "Instacart Analysis"
 author: "Jerry Chiu"
 date: "February 7, 2021"
 output:
-  github_document
-  #html_document: default
+  github_document:
+    html_preview: false
 ---
 
 ```{r setup, include=FALSE}
