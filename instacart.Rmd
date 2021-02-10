@@ -1,3 +1,17 @@
+---
+title: "Instacart Analysis"
+author: "Jerry Chiu"
+date: "February 7, 2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
 setwd('C:/Users/Jerry/Desktop/Jerry/projects/instacart')
 library(ggplot2)
 library(dplyr)
@@ -25,170 +39,202 @@ library(fpc)
 library(tidyr)
 library(tidyverse)
 library(dtw)
-
 set.seed(1)
+options(dplyr.summarise.inform = FALSE)
+options(warn=-1)
+```
 
+## Abstract
+
+The main objective of this project is the mining of relevant association rules for use in hypothetical online recommenders. This is not just a simple mining of all association rules; this project will take into account the flexibility, the usefullness, and the importance of the association rules mined to provide new perspectives in designing recommenders. 
+
+The analysis takes the following steps:
+
+1. Data understanding and data integrity check 
+2. Data cleaning, data exploration, and statistical analysis
+3. Feature Engineering
+4. Clustering of products
+5. Mining of association rules
+6. Exploration of the association rules
+7. Summary
+
+## 1. Data Understanding and integrity check
+
+The data comes from [Instacart](https://tech.instacart.com/3-million-instacart-orders-open-sourced-d40d29ead6f2), an online shopping platform. The datasets used in this project are:
+
+* aisles.csv
+* departments.csv
+* products.csv
+* orders.csv
+* order_products__prior.csv
+
+```{r}
 aisles=read.csv('aisles.csv')
 departments=read.csv('departments.csv')
 products=read.csv('products.csv')
 orders=read.csv('orders.csv')
 order_pp=read.csv('order_products__prior.csv')
 
+# see if any cell is just white space
+white.space=function(data){
+  return(sum(grepl('^[ ]*$',data)))}
+
+# aisles.csv
+colSums(is.na(aisles))
+sapply(aisles, white.space)
+
+# departments
+colSums(is.na(departments))
+sapply(departments, white.space)
+
+# orders
+colSums(is.na(orders)) #206209, all from days_since_prior_order
+sapply(orders, white.space)
+
+# products
+colSums(is.na(products))
+sapply(products, white.space)
+
+# order_pp
+colSums(is.na(products))
+```
+
+we see that there are no white space or NA's except for the 206209 NA's in orders.csv, let's see why.
+
+```{r}
+head(orders[which(is.na(orders$days_since_prior_order)),])
+```
+
+we see that the order_id is quite random, but the user_id goes up and is in order, and order_number is always 1. let's guess that the relationship is that days_since_prior_order is NA exactly when order_number is 1
+
+```{r}
+nrow(filter(orders, is.na(days_since_prior_order), order_number!=1))
+```
+
+we get nothing such that order number is not 1 and days_since_prior_order is NA, confirming the conjecture
+
+Now the data integrity is checked, we can go onto understand and explore it.
+
 products=read.csv('products_clean.csv')
 products.clust=read.csv('products_clust.csv')
 clusters=read.csv('cluster.csv')
 aisle.dep=read.csv('aisle_dep.csv')
 order_size=read.csv('order_size.csv')
-#################################### cleaning and exploring ###########################################
 
-#########################check data integrity
-white.space=function(data){
-  return(sum(grepl('^[ ]*$',data)))}
-##### aisles
-colSums(is.na(aisles)) #0
-sapply(aisles, white.space) #0
 
-##### departments
-colSums(is.na(departments)) #0
-sapply(departments, white.space) #0
+# aisles.csv
 
-##### orders
-colSums(is.na(orders)) #206209, all from days_since_prior_order
-sapply(orders, white.space) #0
-# check what is causing the problem,
-head(orders[which(is.na(orders$days_since_prior_order)),])
-# we see that the order_id is quite random, but the user_id goes up and is in order, and order_number is always 1
-# let's guess that the relationship is that days_since_prior_order is NA exactly when order_number is 1
-nrow(filter(orders, is.na(days_since_prior_order), order_number!=1))
-# we get nothing such that order number is not 1 and days_since_prior_order is NA, confirming the conjecture
+```{r}
+str(aisles)
+head(aisles)
+```
 
-##### products
-colSums(is.na(products)) #0
-sapply(products, white.space) #0
+aisles.csv contains the aisle ID and aisle name that the products are sorted into. Total of 134 aisles. Aisle 6 looks peculiar as it is labeled "other", and aisles 100 is named "missing". Otherwise, nothing interesting yet. 
 
-################################### explore data ################################
+# departments.csv
 
-#--------------------------------- aisles -----------------------------------
-str(aisles) # aisles_id looks like just counting integers from 1 to 134, aisle is characters
-head(aisles) # aisle 6 looks peculiar as it is labeled "other"
-# let's see if any aisle number is repeated
-sum(duplicated(aisles$aisle_id)) #0, therefore aisle_id is unique 
+```{r}
+str(departments)
+head(departments)
+```
 
-#--------------------------------- departments ---------------------------------
-str(departments) # about the same as aisles, just less rows
-head(departments) # department 2 is peculiar as it is labeled "other"
-# let's see if any dep number is repeated
-sum(duplicated(departments$department_id)) #0, therefore department_id is unique
+departments.csv contains the department ID and department name that the products are sorted into. Total of 21 departments. Department 2 looks peculiar as it is labeled "other", and department 21 is named "missing". Otherwise, nothing interesting yet.
 
-#--------------------------------- orders ---------------------------------
-str(orders) #eval_set is character and everyting else looks like integers
-# let's go in further and check each column
-#------------------order_id, lets see if there are any repeated ones
-sum(duplicated(orders$order_id)) #0, order_id is unique
+# orders
 
-#------------------ user_id, we see from the str that user_id is repeated, my hunch is that (user_id, order_number) form an unique ordered pair,
-# meaning order_number is tied to user_id
-sum(duplicated(orders[,c('user_id','order_number')])) #0, my hunch was right, each user has a set of unique order_numebrs
+```{r}
+str(orders) 
+```
 
-#------------------ eval_set, character, let's see its table
-table(orders$eval_set) # looks like 3 levels, prior, test, and train
-# as described in the data set description, the orders are split into prior orders, test orders, and train orders, 
-# the number of orders in each set agrees with the numbers in the table. Not much else here
+orders.csv contains the order inormation of each user. It contains the user id off each customer, the order id or each order, the day and hour the order is placed, the order number of each user (chronologically), and the gep between two off the user's consecutive orders (days since prior order). Let's look at some stats starting with the number of orders each user has placed.
 
-#------------------ order_number, we already know that order_number is unique for each user_id, but are the numbers consecutive?
-# we can check it by checking the range of the order_numbers for each user and compare it with the number of orders
-test=orders%>%group_by(user_id)%>%summarise(eq=(max(order_number)==n()))
-all(test$eq) # all true!, that means that the max value agrees with the number of orders,
-range(orders$order_number) # only positive order numbers
-# along with knowing that order_number is unique per user, this mean that the order numbers start at 1 and increases without gaps
-# lets check the stats for number of orders for each user
+```{r}
 test=orders%>%group_by(user_id)%>%summarise(max=max(order_number))
-summary(test$max) # minimum of 4 orders, max of 100 orders! avg of 16.59
-sd(test$max/mean(test$max)) #1.0038, pretty decent variation
-hist(test$max) # looks like a small outlier of supershoppers with 100 orders
+summary(test$max)
+hist(test$max, main='Histogram of number of orders per user', xlab='days')
+```
 
-#------------------ order_dow is described as being day of week, lets check it
-range(orders$order_dow)# 0 to 6, 
-# a little histogram will show us the stats
-hist(orders$order_dow) # looks like day of week 0 and 1 are the most popular
-# does the avg user order at a particular dow?
-# let's calculate the max freqs
+Looks like a small outlier of supershoppers with 100 orders...
+next, we examine the days of the week the orders are placed. 
+
+```{r}
+hist(orders$order_dow, main='Histogram of orders per day of week', xlab='day of week')
+```
+
+Looks like day of week 0 and 1 are the most popular. Does the avg user order on a particular dow?
+
+```{r}
 test1=orders%>%group_by(user_id, order_dow)%>%summarise(n=n())
 test=test1%>%group_by(user_id)%>%summarize(max=1/max(n/sum(n)))
-summary(test$max) #mean of 2.923
-hist(test$max)
-# the result is such that the avg user shops about 3 main days of the week, reasonably spread
+summary(test$max)
+hist(test$max, main='Histogram of how many days a week users submit orders', xlab='number of days')
+```
 
-#------------------ order_hour_of_day is the hour of day the order is placed, lets check
+The result is such that the avg user shops about 3 main days of the week, reasonably spread. Now let's look at the hour of order, same processes. 
+
+```{r}
 summary(orders$order_hour_of_day) # 0 to 23
-hist(orders$order_hour_of_day) # peak shopping around 10 to 15
-# do ppl have a tendency to order at certain time of day?
+hist(orders$order_hour_of_day, main='Histogram of orders per hour of day', xlab='hour of day')
+```
+
+The peak shopping time is about 10 to 15 o'clock. Do ppl have a tendency to order at certain time of day?
+
+```{r}
 test=orders%>%group_by(user_id)%>%summarise(mean=mean(order_hour_of_day), sd=sd(order_hour_of_day))
 summary(test$mean) #mean of 13.59. about 1 oclock
-hist(test$mean)
-summary(test$sd) # 3.631
-hist(test$sd) # 3.5
-# the avg user usually orders within 3.5 hours of previous orders, somewhat consistent
+hist(test$mean, main='Histogram of summarized mean of order hour per user', xlab='hour of day')
+```
 
+The average standard deviation is 3.5 hours, meaning on average, the users usually orders within 3.5 hours of their previous orders, somewhat consistent. Now the heatmap. 
+
+```{r}
 orders.heat=orders%>%group_by(order_dow, order_hour_of_day)%>%summarise(n=n())
 
 ggplot(data=orders.heat)+
   geom_tile(aes(x=order_dow,y=order_hour_of_day, fill=n))+
-  scale_fill_gradient(high='red', low='green')
+  scale_fill_gradient(high='red', low='green')+
+  labs(title="heatmap of orders of a week", x='day of week', y='hour of day')
+```
 
+Let's see about day since prior order. 
 
-#------------------ days_since_prior_order is self explanatory. we already know from cleaning step that the NA's are tied to each user's 1st order
-# let's check other things such as range and avg days, etc
+```{r}
 summary(orders$days_since_prior_order, na.rm=T) 
-# 0 to 30 days it seems, either there is a hard limit on max days or these shoppers are quite good at keeping up shopping every 30 days
-# mean days of 11.11
-# let's see if 30 days is a hard limit or just some very regular shoppers
-hist(orders$days_since_prior_order) # an odd spike at 30, 
-median(filter(orders, days_since_prior_order!=30)$days_since_prior_order, na.rm=T) # median of 7 days! a week!
-# if the system allows monthly re-orders, then we would expect some months to be 31 days, looks like the hard cap is 30
-# do ppl have a tendency to order in certain day intervals?
-no30=filter(orders, days_since_prior_order!=30 & !is.na(days_since_prior_order)) #removing 30 days since we think it is hard cap, and NA
-# we look at each user and their tendencies
-test=no30%>%group_by(user_id)%>%summarise(mean=mean(days_since_prior_order, na.rm=T), sd=sd(days_since_prior_order, na.rm=T)/mean)
-hist(test$mean)
-summary(test$mean) # median days of about 11 days
-hist(test$sd)
-summary(test$sd) # sd median of about 6 days, quite spread. 
-test=hist(no30$days_since_prior_order)
-plot(test$mids, log(test$count), type='h', lwd=15, lend=2)
-#--------------------------------- products ---------------------------------
-#---------------- the first interest here is the relationship between aisle and department, let's see what it is
-# hunch is that each aisle belong to only 1 dep
+hist(orders$days_since_prior_order, main='Histogram of days since prior order', xlab='days')
+median(filter(orders, days_since_prior_order!=30)$days_since_prior_order, na.rm=T)
+```
+
+Looks like there is a spike at 30 days, this is the cap of the data. The median is 7 days since prior order. 
+Do ppl have a tendency to order in certain day intervals? I think a log graph of the frequency of the histogram would help.
+
+```{r}
+no30=filter(orders, days_since_prior_order!=30 & !is.na(days_since_prior_order)) #removing 30 days since it is a hard cap
+test=hist(no30$days_since_prior_order, plot=F)
+plot(x=1:29, y=log(test$counts), type='line', main='logged histogram of days since prior order', xlab='days', ylab='log of frequency')
+```
+
+Looks quite nice with the peaks at multiples of 7, and the decay after is quite predictable
+In orders, we learned that users usually have 2 to 3 days of the week that they place orders on, and the time of day they do so is within 3.5 hours of each other. We also learned that there is clear signs of weekly ordering (orders of 7, 14, 21, 28 days apart). 
+
+# products
+
+```{r}
+str(products)
+```
+
+products.csv contains the product id, name, the aisle the product belongs to, and the department. The first interest here is the relationship between aisle and department. Each aisle belongs to only 1 department. Let's see the relationship. 
 aisle.dep=unique(products[c('aisle_id','department_id')])
-length(which(duplicated(test$aisle_id))) # there are no duplicated aisle_id, therefore each aisle is within only 1 dep
-# since we know that each aisle is only in 1 dep, lets do some tree map to visualize it
+
+```{r}
 test=products%>%group_by(department_id, aisle_id)%>%summarise(n=n())
 test$department_id=departments[test$department_id,'department']
 test$aisle_id=aisles[test$aisle_id,'aisle']
-png(filename="aisle_dep_treemap.png",width=1920, height=1080)
 treemap(test, index=c('department_id', 'aisle_id'), vSize='n', title='Departments and Aisles', overlap.labels = 1, fontsize.title = 24, fontsize.labels=c(20,15), ymod.labels=c(0.3,0))
-dev.off()
+```
 
-#---------------- product_name, another interest is frequent words or phrases within product names
-# we have to clean the names first and lemmatize everything. 
-products=inner_join(products, aisles)
-products=inner_join(products, departments)
-mystop=stopwords::stopwords(language='en')
-product.names=products$product_name
-product.names=gsub('[^A-z]', ' ', product.names)
-product.names=tolower(product.names)
-product.names=removeWords(product.names, mystop)
-product.names=lemmatize_strings(product.names)
-tokens=Boost_tokenizer(product.names)
-token.table=table(tokens)
-token.table=token.table/max(token.table)
+Now, let's see about the product names, cleaning it, to prepare it for clustering. We do this by comparing the most common adjectives shared among the different aisles.
 
-summary(as.vector(token.table)) 
-wordcloud(words=names(token.table), freq=token.table, min.freq=0.25) #99.9th percentile
-# hmm, we see some noise such as chocolate and chicken, obviously they are not common descriptors
-# like organic, free or whole. We should do something about it.
-# we go through each aisle, and we aim to find common words between the aisles, we don't really care about the 
-# number of items with a particular word since that is why we get chicken or cheese in the first place.
+```{r}
 unique.words=function(data){
   temp=data$product_name
   temp=Boost_tokenizer(temp)
@@ -196,6 +242,9 @@ unique.words=function(data){
   
   return(data.frame(temp))}
 
+mystop=stopwords::stopwords(language='en')
+products=inner_join(products, aisles)
+products=inner_join(products, departments)
 product.names=products
 product.names$product_name=gsub('[^A-z]', ' ', product.names$product_name)
 product.names$product_name=removePunctuation(product.names$product_name)
@@ -211,11 +260,8 @@ aisle.product.names=product.names%>%group_by(aisle)%>%group_modify(~unique.words
 aisle.token.table=table(aisle.product.names$temp)
 aisle.token.table=aisle.token.table/max(aisle.token.table)
 aisle.token.table=aisle.token.table[order(aisle.token.table, decreasing=T)]
-
-# we see that free, natural, organic, original are the our biggest common words between all the aisles. 
-# we can filter them out along with some others when we get to the analysis part.
-# however, we only want to ilter out the non-nouns
-# we use NLP tagging to ffind all the non-nouns in the descriptor 
+#we only want to filter out the non-nouns
+# we use NLP tagging to find all the non-nouns in the descriptor 
 top=data.frame(word=tolower(names(aisle.token.table)), freq=as.vector(aisle.token.table))
 
 annotate.word=function(word){
@@ -238,11 +284,11 @@ topJJ=subset(top, !tags%in%c('NN','DT','TO'))
 topJJ=topJJ[1:50,]
 
 aisle.token.table=subset(aisle.token.table, names(aisle.token.table)%in%topJJ$word)
-png(filename="product_name_cloud.png",width=1920, height=1080)
 par(bg="black")
-wordcloud(words=topJJ$word, freq=topJJ$freq, scale=c(10,-1), rot.per=F, random.order=F, use.r.layout=T, colors=brewer.pal(8,"Accent"), random.color=F) #top words
-dev.off()
+wordcloud(words=topJJ$word, freq=topJJ$freq, scale=c(4,-2), rot.per=F, random.order=F, use.r.layout=T, colors=brewer.pal(8,"Accent"), random.color=F) #top words
+```
 
+we see that free, natural, organic, original are the our biggest common words between all the aisles. We can filter them out along with some others when we get to the analysis part.
 
 count.ngrams=function(data, n, nword='all'){
   temp=data$product_name
