@@ -575,36 +575,23 @@ supp.min=quantile(clusters$prop, 0.5)
 test.arules=apriori(transactions, parameter = list(supp=supp.min, conf = 0.2, target = "rules"))
 arules.frame=DATAFRAME(test.arules)
 
+rule.cross.aisle=function(row){
+  print(row)
+  rhs=gsub('[{|}]', '', row['RHS'])
+  lhs=gsub('[{|}]', '', row['LHS'])
+  rhs=as.numeric(str_split(rhs, ',')[[1]])
+  lhs=as.numeric(str_split(lhs, ',')[[1]])
+  rhs=unique(rhs%/%100)
+  lhs=unique(lhs%/%100)
+  return(ifelse(length(intersect(lhs,rhs)), 0, 1))
+}
 
-#we've seen that in the cluster frequencies, some items are bought too frequently. It really tainted the associations
-# because all the rules with high conidence are with those items. We must remove them with outlier.
-string_in=function(x, patterns){
-  matched=F
-  for(n in patterns){
-    if(grepl(n,x)){
-      matched=T
-      break}
-    }
-  return(matched)
-  }
+rule.cluster.name=function(row){
+  row=gsub('[{|}]', '', row)
+  row=as.numeric(str_split(row, ',')[[1]])
+  row=paste(cluster.names[which(cluster.names$clusters%in%row),'cluster.name'], collapse=', ')
+  return(row)
+}
 
-outlier.products=clusters[which(clusters$prop>supp.max),]
-outlier.products=outlier.products[order(outlier.products$prop, decreasing=T),]
-outlier.products=as.character(outlier.products[1:100,'clusters'])
 
-arules.frame=arules.frame[which(!sapply(arules.frame$LHS, string_in, patterns=outlier.products)),]
-arules.frame=arules.frame[which(!sapply(arules.frame$RHS, string_in, patterns=outlier.products)),]
 
-#------------------------ Looking at reorder ----------
-order.reorder=order_pp%>%group_by(order_id)%>%summarise(reorder=sum(reordered), size=max(add_to_cart_order))
-order.reorder=mutate(order.reorder, reorder.prop=reorder/size)
-order.reorder.plot=order.reorder%>%group_by(size)%>%summarise(mean=mean(reorder.prop), sd=sd())
-ggplot(order.reorder.plot)+
-  geom_point(aes(x=size, y=mean))+
-  geom_line(aes(x=size, y=mean-sd))+
-  geom_line(aes(x=size, y=mean+sd))
-
-order_pp=inner_join(order_pp, products[c('product_id','aisle_id')], by='product_id')
-test=order_pp
-test=test%>%group_by(order_id, aisle_id)%>%summarise(n=n())
-test=table(test$order_id, test$aisle_id)

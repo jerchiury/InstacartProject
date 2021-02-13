@@ -4,11 +4,11 @@ author: "Jerry Chiu"
 date: "February 7, 2021"
 output:
   github_document:
-    html_preview: false
+    html_preview: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message=F)
 ```
 
 ```{r include=FALSE}
@@ -52,11 +52,10 @@ The analysis takes the following steps:
 
 1. Data understanding and data integrity check 
 2. Data cleaning, data exploration, and statistical analysis
-3. Feature Engineering
-4. Clustering of products
-5. Mining of association rules
-6. Exploration of the association rules
-7. Summary
+3. Clustering of products
+4. Mining of association rules
+5. Exploration of the association rules
+6. Summary
 
 ## 1. Data Understanding and integrity check
 
@@ -229,7 +228,7 @@ aisle.dep=unique(products[c('aisle_id','department_id')])
 test=products%>%group_by(department_id, aisle_id)%>%summarise(n=n())
 test$department_id=departments[test$department_id,'department']
 test$aisle_id=aisles[test$aisle_id,'aisle']
-treemap(test, index=c('department_id', 'aisle_id'), vSize='n', title='Departments and Aisles', overlap.labels = 1, fontsize.title = 24, fontsize.labels=c(20,15), ymod.labels=c(0.3,0))
+treemap(test, index=c('department_id', 'aisle_id'), vSize='n', title='Departments and Aisles', overlap.labels = 1, fontsize.title = 24, fontsize.labels=c(15, 10), ymod.labels=c(0.3,0))
 ```
 
 Now, let's see about the product names, cleaning it, to prepare it for clustering. We do this by comparing the most common adjectives shared among the different aisles.
@@ -285,14 +284,15 @@ topJJ=topJJ[1:50,]
 
 aisle.token.table=subset(aisle.token.table, names(aisle.token.table)%in%topJJ$word)
 par(bg="black")
-wordcloud(words=topJJ$word, freq=topJJ$freq, scale=c(4,-2), rot.per=F, random.order=F, use.r.layout=T, colors=brewer.pal(8,"Accent"), random.color=F) #top words
+wordcloud(words=topJJ$word, freq=topJJ$freq, scale=c(4,-1), rot.per=F, random.order=F, use.r.layout=T, colors=brewer.pal(8,"Accent"), random.color=F) #top words
 ```
 
-we see that free, natural, organic, original are the our biggest common words between all the aisles. We can filter them out along with some others when we get to the analysis part.
+we see that free, natural, organic, original are the our biggest common words between all the aisles. We can filter them out along with some others when we get to the analysis part.Now let's have a look of what things are in each department. 
 
+```{r}
 count.ngrams=function(data, n, nword='all'){
   temp=data$product_name
-  temp=removeWords(temp, top10)
+  temp=removeWords(temp, topJJ$word)
   temp=gsub(" *\\b[[:alpha:]]{1}\\b *", " ", temp)
   temp=trimws(temp)
   temp=gsub(' +', ' ',temp)
@@ -307,29 +307,18 @@ ngram.treemap=function(data, n, nword){
   ngram.dep=data%>%group_by(department_id)%>%group_modify(~count.ngrams(.x, n=n, nword=nword))
   ngram.dep$department_id=str_to_title(departments[ngram.dep$department_id,'department'])
   ngram.dep$size=1
-  png(filename=paste0("dep_", n, "gram_treemap.png"),width=1920, height=1080)
   treemap(ngram.dep, index=c('department_id', 'ngrams'), algorithm='pivotSize', vSize='size', title=paste0('Top ', nword,' Frequent ', n, '-grams of each Department'), overlap.labels = 1, 
-          fontsize.title = 20, fontsize.labels=c(25,18), bg.labels=0, fontcolor.labels=c('white','black'), force.print.labels=T, ymod.labels=c(0.3,0))
-  dev.off()
+          fontsize.title = 20, fontsize.labels=c(15, 7), bg.labels=0, fontcolor.labels=c('white','black'), force.print.labels=T, ymod.labels=c(0.3,0))
   }
 
-for(i in c(1,2,3,4)){ngram.treemap(product.names, i, 10)}
-# variance of product per aisle based on product name only, the higher the variance, the lower the name diversity
-prod.var=product.names%>%group_by(department_id, aisle_id)%>%group_modify(~count.ngrams(.x, n=1))
-prod.var=prod.var%>%group_by(department_id, aisle_id)%>%summarise(var=1/(var(prop)+0.00000001))
-prod.var$department_id=str_to_title(departments[prod.var$department_id,'department'])
-prod.var$aisle_id=aisles[prod.var$aisle_id,'aisle']
+for(i in c(1,2)){ngram.treemap(product.names, i, 10)}
+```
 
-png(filename="aisle_name_var.png",width=1920, height=1080)
-treemap(prod.var, index=c('department_id', 'aisle_id'), algorithm='pivotSize', vSize='var', title="Variance of 1-gram of aisles", overlap.labels = 1, 
-        fontsize.title = 20, fontsize.labels=c(25,18), bg.labels=0, fontcolor.labels=c('white','black'), force.print.labels=T, ymod.labels=c(0.3,0))
-dev.off()
+We clearly see that the aisle and department named "missing" has products that have names with ice cream, dark chocolate, etc. We should be able to sort them into the other aisles.
 
-# huge variation in the missing and other dep and aisle. 
+if we know aisle, we know its department already, so really, gotta put them into correct aisle. We do this by matching ngrams of the product to the ngrams in each aisle then choosing the aisle with the most matches as the aisle. We do a test on the non-missing product first to see the accuracy of this method, then we can do it on the missing aisle. 
 
-# putting missing dep and aisle into real dep and aisle
-# if we know aisle, we know its department already, so really, gotta put them into correct aisle
-# we first construct a table of all 1, 2 and 3-grams of each aisle
+```{r}
 product.names$product_name=removeWords(product.names$product_name, topJJ$word)
 product.names$product_name=gsub(" *\\b[[:alpha:]]{1}\\b *", " ", product.names$product_name)
 product.names$product_name=trimws(product.names$product_name)
@@ -369,23 +358,21 @@ predict.aisle=function(data){
 }
 
 aisle.phrases=filter(product.names, aisle!='missing')%>%group_by(aisle_id)%>%group_modify(~get.aisle.phrases(.x))
-
-missing.aisle=filter(product.names, aisle=='missing')
-
 test=product.names[sample(nrow(product.names),size=3000),]
 
 for(i in 1:nrow(test)){
   test[i,'pred']=predict.aisle(test[i,])
-  print(i)
 }
 
+length(which(test$pred==test$aisle_id))/3000
+```
 
-length(which(test$pred==test$aisle_id))/3000 #91% accuracy
+The accuracy of this method/model is around 90% with non-missing aisles, it's pretty good. We now go to put the products in the missing aisle into the other aisles. 
 
-
+```{r}
+missing.aisle=filter(product.names, aisle=='missing')
 for(i in 1:nrow(missing.aisle)){
   missing.aisle[i,'aisle_id']=predict.aisle(missing.aisle[i,])
-  print(i)
   }
 
 aisle.dep=unique(products[c('aisle_id','aisle','department_id','department')])
@@ -394,15 +381,19 @@ missing.aisle[c('aisle','department_id','department')]=
   aisle.dep[missing.aisle$aisle_id, c('aisle','department_id','department')]
 test=product.names
 product.names[which(product.names$aisle=='missing'),]=missing.aisle
+```
 
-write.csv(product.names, 'products_clean.csv', row.names=F)
+# orders_products_prior 
+```{r}
+str(order_pp)
+```
 
-#------------------------------------ orders_pp ----------------------------------------
-str(order_pp) #all ints, a summary makes no sense since they are all mostly categorical integers
-#---------------- order_id, the sensible thing here is to see the stats of order size
+order_products_prior is the item-by-item list of each order. It includes the order id, the product id, if the product is a reorder from last order, and the order which the item is added to the cart. 
+
+```{r}
 order_size=order_pp%>%group_by(order_id)%>%summarise(n=max(add_to_cart_order))
-summary(order_size) # median 8, mean 10.09
-sd(order_size) # 7.525, which is a lot
+summary(order_size$n)
+sd(order_size$n)
 
 outlier.range=function(data, mult=1.5){
   low=quantile(data, 0.25, na.rm=T)
@@ -420,28 +411,25 @@ ggplot()+
   geom_bar(data=order_size, stat='identity', aes(x=n, y=num.order, fill=num.user))+
   labs(title='Number of orders per order size', x='Order Size', y='Number of Orders')+
   scale_fill_gradient(name = "Number of Users", low='#0027fc', high='#f71b1b')
-  
+```
 
-#---------------- product_id
-length(which(!order_pp$product_id %in% products$product_id)) # no unknown product id's
-# treemap of aisle and dep based on number of orders, lets inner join the products with order_pp
+```{r}
 order_pp=inner_join(order_pp, products, by='product_id')
-
 order_size=order_pp%>%group_by(department, aisle)%>%summarise(n=n(), reordered=sum(reordered), reorder_pct=reordered/n*100)
-
-png(filename="product_order_reorder.png",width=1920, height=1080)
 treemap(order_size, index=c('department', 'aisle'), algorithm='pivotSize', type='value', vSize='n', vColor='reorder_pct', title="Number of orders and reorders", 
-        overlap.labels = 1, fontsize.title = 20, fontsize.labels=c(25,18), bg.labels=0, fontcolor.labels=c('white','black'), 
-        fontsize.legend=30, force.print.labels=T, ymod.labels=c(0.3,0), palette='RdYlBu')
-dev.off()
-# Let's see the order the products are placed in baskets and how much of the order they constitute
+        overlap.labels = 1, fontsize.title = 15, fontsize.labels=c(12, 7), bg.labels=0, fontcolor.labels=c('white','black'), 
+        fontsize.legend=10, force.print.labels=T, ymod.labels=c(0.3,0), palette='RdYlBu')
+```
+
+Let's see the order the products are placed in baskets and how much of the order they constitute.
+
+```{r}
 basket=order_pp[c('order_id', 'department_id', 'add_to_cart_order', 'reordered')]
 basket=basket%>%group_by(department_id)
 
 i=0
 basket.order=function(data){
   i<<-i+1
-  print(i)
   mean=mean(data$add_to_cart_order)
   temp=data[order(data$order_id, data$add_to_cart_order),]
   temp=data%>%group_by(order_id)%>%summarise(first=first(add_to_cart_order))
@@ -456,75 +444,41 @@ basket=filter(basket, department!='missing')
 basket$reordered=basket$reordered/basket$total
 
 ggplot(data=basket, aes(x=first, y=total, label=str_to_title(department)))+
-  geom_point(size=basket$reordered^2*35, color='red', alpha=0.7)+
+  geom_point(size=basket$reordered^2*25, color='red', alpha=0.7)+
   labs(title='Department popularity', x='Mean of first add to cart order', y='Total orders')+
-  geom_text_repel(box.padding=0.7)
+  geom_text_repel(box.padding=0.2)
+```
 
-ggplot(data=basket, aes(x=mean, y=total, label=str_to_title(department)))+
-  geom_point(size=basket$reordered^2*35, color='blue', alpha=0.7)+
-  labs(title='Department popularity', x='Mean of add to cart order', y='Total orders')+
-  geom_text_repel(box.padding=0.7)
+The above shows the department popularity, as measured in the order at which they are placed in the cart, and their re-order rate (circle size). Looks like produce and dairy are usually the first items customers go to for reorders. Now lets see the relationship between days since prior order and the basket size.
 
-test=table(order_pp$order_id)
-test=data.frame(order_id=names(test), size=as.vector(test))
-write.csv(test, 'order_size.csv', row.names=F)
-
-# now we can actually go back to orders and find out the relationship between days_since_prior_order and ordeer size
+```{r}
+order_size=table(order_pp$order_id)
+order_size=data.frame(order_id=names(order_size), size=as.vector(order_size))
+order_size$order_id=as.numeric(order_size$order_id)
+# now we can actually go back to orders and find out the relationship between days_since_prior_order and order size
 orders=inner_join(orders, order_size, by='order_id')
 summary(order_size$size)
 orders.plot=filter(orders, size %between% outlier.range(size, 2), 
                    days_since_prior_order<30, !is.na(days_since_prior_order))
 orders.plot=orders.plot%>%group_by(size, days_since_prior_order)%>%summarise(n=n())
-
-
-png(filename="prior_order_size_tile.png",width=1920, height=1080)
 ggplot(data=orders.plot)+
   geom_tile(aes(x=size, y=days_since_prior_order, fill=n))+
   scale_fill_gradient(name='number of orders', low='darkblue', high='orange')+
   scale_x_continuous(breaks=seq(0, max(orders.plot$size), 1), labels=seq(0, max(orders.plot$size), 1))+
   scale_y_continuous(breaks=seq(0,30,1), labels=seq(0,30,1))+
-  theme(text = element_text(size=25), legend.key.size = unit(20, 'mm'))+
+  theme(text = element_text(size=10), legend.key.size = unit(10, 'mm'))+
   labs(title='size of orders vs days since prior order',x='size of order',y='days since prior order')
-dev.off()
+```
 
-################################## Feature Engineering and modelling #########################################
-# first order of business is to cluster the products so that each aisle is split into many clusters of similar products
-# we would do this with the cleaned product names and using ngrams
+There seems to be no apparent relationship between the basket size and days since prior order. 
 
-word.dist=function(word1, word2){
-  if(word1=='' | word2==''){return(1)}else{
-    word1=strsplit(word1, ' ')[[1]]
-    word2=strsplit(word2, ' ')[[1]]
-    total.length=length(word1)+length(word2)
-    temp=length(c(setdiff(word1, word2),setdiff(word2, word1)))/total.length
-    return(temp)
-  }}
 
-word.dist.matrix=function(words){
-  dim=length(words)
-  distance=matrix(nrow=dim, ncol=dim)
-  for(i in 1:dim){
-    for(k in 1:i){
-      val=word.dist(words[i],words[k])
-      distance[i,k]=val
-      distance[k,i]=val}
-    }
-  return(distance)
-  }
+## 3. Clustering of products
 
-fast.dist=function(data){
-  dim.data=nrow(data)
-  # x^2 and y^2 and -2xy
-  mat=as.matrix(data)
-  mat=data%*%t(data)
-  diag=diag(mat)
-  x2mat=matrix(data=diag, ncol=dim.data, nrow=dim.data)
-  y2mat=t(x2mat)
-  dist=x2mat+y2mat-2*mat
-  dist=sqrt(dist)
-  return(round(dist,10))
-  }
+first order of business is to cluster the products so that each aisle is split into many clusters of similar products. We would do this with the cleaned product names and using ngrams. 
 
+```{r}
+aisle.dep=products%>%group_by(department, aisle)%>%summarise(n=n())
 fast.cos.dist=function(data){
   dim.data=nrow(data)
   mat=as.matrix(data)
@@ -545,28 +499,7 @@ count.words=function(data, top=5){
   return(temp)
 }
 
-
-temp=products%>%group_by(aisle_id)%>%summarise(n=n())
-
-test=subset(products, aisle_id==2)
-names=VCorpus(VectorSource(test$product_name))
-names=DocumentTermMatrix(names)
-names=as.matrix(names)
-test.dist=as.dist(fast.cos.dist(names))
-
-test.clust=hclust(test.dist, method='ward.D2')
-out=outlier.range(test.clust$height)[2]
-plot(test.clust)
-rect.hclust(test.clust, k=floor(sqrt(nrow(test))))
-test=cbind(test, clust=cutree(test.clust, k=floor(sqrt(nrow(test)))))
-
-
-cluster.tokens=test%>%group_by(clust)%>%group_modify(~count.words(.x, top=3))
-
-i=0
 cluster.prod=function(data){
-  i<<-i+1
-  print(i)
   names=VCorpus(VectorSource(data$product_name))
   names=DocumentTermMatrix(names)
   names=as.matrix(names)
@@ -587,13 +520,8 @@ name.cluster=function(data){
   return(data.frame(cluster.name=data, cluster.size=cluster.size))
 }
 
-
-test=filter(products.clust, clusters==202)
-name.cluster2(test)
-
-products.clust=products%>%group_by(aisle_id)%>%group_modify(~cluster.prod(.x))
+products.clust=product.names%>%group_by(aisle_id)%>%group_modify(~cluster.prod(.x))
 products.clust$clusters=products.clust$clusters+100*products.clust$aisle_id
-write.csv(products.clust, 'products_clust.csv', row.names=F)
 
 # cluster names now, extracted from the top words of each aisle
 cluster.names=products.clust%>%group_by(aisle_id, clusters)%>%group_modify(~name.cluster(.x))
@@ -601,56 +529,66 @@ order_pp=inner_join(order_pp, products.clust[c('product_id','clusters')], by='pr
 cluster.freq=table(order_pp$clusters)
 cluster.freq=data.frame(clusters=names(cluster.freq), freq=as.vector(cluster.freq))
 cluster.freq$clusters=as.numeric(cluster.freq$clusters)
-cluster.freq=inner_join(cluster.freq, cluster.names, by='clusters')
-cluster.freq$prop=cluster.freq$freq/sum(cluster.freq$freq)
-write.csv(cluster.freq, 'cluster.csv', row.names=F)
-#------------------ Association rules --------------------------
-# now we have the clustered items, we join it with the orders_pp
+cluster.names=inner_join(cluster.freq, cluster.names, by='clusters')
+cluster.names$prop=cluster.freq$freq/sum(cluster.freq$freq)
+```
 
+## Association rule mining with apriori
+
+Now we have the clustered items, we join it with the orders_pp so we can apply apriori. But first, we gotta 
+
+```{r}
 transactions=inner_join(order_pp[c('order_id','product_id')], products.clust[c('product_id','clusters')], by='product_id')
 transactions=transactions[,-which(names(transactions)=='product_id')]
-outlier.products=clusters[which(clusters$prop>quantile(clusters$prop, 0.95)),'clusters']
+outlier.products=cluster.names[which(cluster.names$prop>quantile(cluster.names$prop, 0.95)),'clusters']
 transactions=filter(transactions, !clusters%in%outlier.products)
 transactions=format_csv(transactions)
 conn=textConnection(object=transactions)
 transactions=read.transactions(conn, 'single', cols=c("order_id","clusters"), header=T, sep = ",")
-
-
 ##transactions=read.transactions('order_transactions.csv', 'single', cols=c("order_id","clusters"), header=T, sep = ",")
-supp.min=quantile(clusters$prop, 0.5)
-test.arules=apriori(transactions, parameter = list(supp=supp.min, conf = 0.2, target = "rules"))
-arules.frame=DATAFRAME(test.arules)
+supp.min=quantile(cluster.names$prop, 0.3)
+rules=apriori(transactions, parameter = list(supp=supp.min ,conf = 0.15, target = "rules"))
+rules.frame=DATAFRAME(rules)
+rules.frame=rules.frame[order(rules.frame$lift, decreasing=T),]
+
+rule.cluster.name=function(row){
+  row=gsub('[{|}]', '', row)
+  row=as.numeric(str_split(row, ',')[[1]])
+  row=paste(cluster.names[which(cluster.names$clusters%in%row),'cluster.name'], collapse=', ')
+  return(row)
+}
+
+rules.frame$LHS.name=sapply(rules.frame$LHS, rule.cluster.name)
+rules.frame$RHS.name=sapply(rules.frame$RHS, rule.cluster.name)
+head(rules.frame)
+```
+
+Nice, let's look at some rules that crosses aisles. 
+
+```{r}
+rule.cross.aisle=function(row){
+  rhs=gsub('[{|}]', '', row['RHS'])
+  lhs=gsub('[{|}]', '', row['LHS'])
+  rhs=as.numeric(str_split(rhs, ',')[[1]])
+  lhs=as.numeric(str_split(lhs, ',')[[1]])
+  rhs=unique(rhs%/%100)
+  lhs=unique(lhs%/%100)
+  return(ifelse(length(intersect(lhs,rhs)), F, T))
+}
+
+rules.frame$cross.aisle=apply(rules.frame, 1, rule.cross.aisle)
+table(rules.frame$cross.aisle)
+cross.aisle=filter(rules.frame, cross.aisle==1)
+head(cross.aisle, 20)
 
 
-#we've seen that in the cluster frequencies, some items are bought too frequently. It really tainted the associations
-# because all the rules with high conidence are with those items. We must remove them with outlier.
-string_in=function(x, patterns){
-  matched=F
-  for(n in patterns){
-    if(grepl(n,x)){
-      matched=T
-      break}
-    }
-  return(matched)
-  }
+```
 
-outlier.products=clusters[which(clusters$prop>supp.max),]
-outlier.products=outlier.products[order(outlier.products$prop, decreasing=T),]
-outlier.products=as.character(outlier.products[1:100,'clusters'])
+Some interesting cross-aisle rules found by just scanning:
 
-arules.frame=arules.frame[which(!sapply(arules.frame$LHS, string_in, patterns=outlier.products)),]
-arules.frame=arules.frame[which(!sapply(arules.frame$RHS, string_in, patterns=outlier.products)),]
+```{r}
+cross.aisle[c(49, 43, 57, 12, 380, 58),c('LHS.name','RHS.name','lift')]
+```
 
-#------------------------ Looking at reorder ----------
-order.reorder=order_pp%>%group_by(order_id)%>%summarise(reorder=sum(reordered), size=max(add_to_cart_order))
-order.reorder=mutate(order.reorder, reorder.prop=reorder/size)
-order.reorder.plot=order.reorder%>%group_by(size)%>%summarise(mean=mean(reorder.prop), sd=sd())
-ggplot(order.reorder.plot)+
-  geom_point(aes(x=size, y=mean))+
-  geom_line(aes(x=size, y=mean-sd))+
-  geom_line(aes(x=size, y=mean+sd))
+Looks like we got some lasagna, s'mores, pizza, vanilla chocolate cake, movie snacks with popcorn and chips, and gin and tonic. Those are just a few of the variety we have in the cross-aisle rules. 
 
-order_pp=inner_join(order_pp, products[c('product_id','aisle_id')], by='product_id')
-test=order_pp
-test=test%>%group_by(order_id, aisle_id)%>%summarise(n=n())
-test=table(test$order_id, test$aisle_id)
