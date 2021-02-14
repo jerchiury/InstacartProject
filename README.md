@@ -22,6 +22,7 @@ The product basket placement:
 ![](instacart_files/figure-markdown_github/unnamed-chunk-25-1.png)
 
 Some interesting cross-aisle rules found, the names are the cluster names, descriptive of the product cluster, not the real product names:
+
     ##                                           LHS.name                RHS.name
     ## 49       marinara sauce spicy, ricotta cheese skim     lasagna wheat pasta
     ## 43  marshmallow vanilla puff, cracker graham honey      chocolate bar milk
