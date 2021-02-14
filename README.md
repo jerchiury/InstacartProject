@@ -5,7 +5,7 @@ February 7, 2021
 
 ## Instacart Analysis
 
-Instacart is an online grocery store with around 50000 items. The main objective of this project is the mining of relevant association rules for use in hypothetical online recommenders. This is not just a simple mining of all association rules; this project will take into account the flexibility, the usefullness, and the importance of the association rules mined to provide new perspectives in designing recommenders. For the in-depth report, please go to [the project final report](https://github.com/jerchiury/InstacartProject/blob/master/instacart.Rmd). 
+Instacart is an online grocery store with around 50000 items. The main objective of this project is the mining of relevant association rules for use in hypothetical online recommenders. This is not just a simple mining of all association rules; this project will take into account the flexibility, the usefullness, and the importance of the association rules mined to provide new perspectives in designing recommenders. For the in-depth report, please go to [the project final report](https://github.com/jerchiury/InstacartProject/blob/master/instacart.md). 
 
 Below is some brief results:
 
