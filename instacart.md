@@ -14,7 +14,6 @@ The analysis takes the following steps:
 3.  Clustering of products
 4.  Mining of association rules
 5.  Exploration of the association rules
-6.  Summary
 
 ## 1. Data Understanding and integrity check
 
@@ -325,6 +324,10 @@ plot(x=1:29, y=log(test$counts), type='line', main='logged histogram of days sin
 ```
 
 ![](instacart_files/figure-markdown_github/unnamed-chunk-15-1.png)
+
+``` r
+rm(no30)
+```
 
 Looks quite nice with the peaks at multiples of 7, and the decay after is quite predictable In orders, we learned that users usually have 2 to 3 days of the week that they place orders on, and the time of day they do so is within 3.5 hours of each other. We also learned that there is clear signs of weekly ordering (orders of 7, 14, 21, 28 days apart).
 
@@ -721,17 +724,24 @@ rules=apriori(transactions, parameter = list(supp=supp.min ,conf = 0.15, target 
     ## Absolute minimum support count: 137 
     ## 
     ## set item appearances ...[0 item(s)] done [0.00s].
-    ## set transactions ...[2236 item(s), 2982551 transaction(s)] done [7.35s].
-    ## sorting and recoding items ... [2176 item(s)] done [0.28s].
-    ## creating transaction tree ... done [4.09s].
-    ## checking subsets of size 1 2 3 4 5 6 done [5.05s].
-    ## writing ... [13933 rule(s)] done [0.04s].
-    ## creating S4 object  ... done [0.85s].
+    ## set transactions ...[2236 item(s), 2982551 transaction(s)] done [5.37s].
+    ## sorting and recoding items ... [2176 item(s)] done [0.20s].
+    ## creating transaction tree ... done [3.40s].
+    ## checking subsets of size 1 2 3 4 5 6 7 done [4.26s].
+    ## writing ... [13947 rule(s)] done [0.03s].
+    ## creating S4 object  ... done [0.57s].
 
 ``` r
+rm(transactions)
 rules.frame=DATAFRAME(rules)
 rules.frame=rules.frame[order(rules.frame$lift, decreasing=T),]
+```
 
+## Exploration of association rules
+
+We now have the rules, let's see what special things can be found.
+
+``` r
 rule.cluster.name=function(row){
   row=gsub('[{|}]', '', row)
   row=as.numeric(str_split(row, ',')[[1]])
@@ -741,25 +751,104 @@ rule.cluster.name=function(row){
 
 rules.frame$LHS.name=sapply(rules.frame$LHS, rule.cluster.name)
 rules.frame$RHS.name=sapply(rules.frame$RHS, rule.cluster.name)
-head(rules.frame)
+head(rules.frame[, c('LHS.name','RHS.name')], 20)
 ```
 
-    ##                   LHS    RHS      support confidence     coverage     lift
-    ## 5              {4116} {4103} 8.113860e-05  0.6487936 1.250607e-04 713.2547
-    ## 7524 {4109,4110,4111} {4101} 4.962195e-05  0.9135802 5.431592e-05 674.2885
-    ## 540       {4109,4114} {4101} 5.062780e-05  0.8388889 6.035102e-05 619.1608
-    ## 543       {4109,4110} {4101} 1.052790e-04  0.8373333 1.257313e-04 618.0127
-    ## 742       {4110,4114} {4101} 6.873311e-05  0.8232932 8.348558e-05 607.6501
-    ## 7526 {4101,4110,4111} {4109} 4.962195e-05  0.3540670 1.401485e-04 565.0202
-    ##      count                                       LHS.name        RHS.name
-    ## 5      242                           tasty treasure gravy cat food dinner
-    ## 7524   148  cat food tuna, beef cat food, food cat salmon  feast cat food
-    ## 540    151                 cat food tuna, cat food turkey  feast cat food
-    ## 543    314                   cat food tuna, beef cat food  feast cat food
-    ## 742    205                 beef cat food, cat food turkey  feast cat food
-    ## 7526   148 feast cat food, beef cat food, food cat salmon   cat food tuna
+    ##                                                                     LHS.name
+    ## 5                                                       tasty treasure gravy
+    ## 7524                           cat food tuna, beef cat food, food cat salmon
+    ## 540                                           cat food tuna, cat food turkey
+    ## 543                                             cat food tuna, beef cat food
+    ## 742                                           beef cat food, cat food turkey
+    ## 7526                          feast cat food, beef cat food, food cat salmon
+    ## 22                                                           dal lentil bean
+    ## 11665  food baby pear, chicken food stage, stage just apple, baby food stage
+    ## 11655  food baby pear, chicken food stage, apple food baby, stage just apple
+    ## 542                                          feast cat food, cat food turkey
+    ## 11685   food baby pear, chicken food stage, apple food baby, baby food stage
+    ## 11660 chicken food stage, apple food baby, stage just apple, baby food stage
+    ## 797                                           beef cat food, food cat salmon
+    ## 25                                                           cat food savory
+    ## 736                                          beef cat food, treat cat salmon
+    ## 7582                     food baby pear, chicken food stage, baby food stage
+    ## 7554                    food baby pear, chicken food stage, stage just apple
+    ## 7574                     food baby pear, chicken food stage, apple food baby
+    ## 7525                          feast cat food, cat food tuna, food cat salmon
+    ## 550                                           cat food tuna, food cat salmon
+    ##                      RHS.name
+    ## 5             cat food dinner
+    ## 7524           feast cat food
+    ## 540            feast cat food
+    ## 543            feast cat food
+    ## 742            feast cat food
+    ## 7526            cat food tuna
+    ## 22     indian cuisine spinach
+    ## 11665 dinner vegetable turkey
+    ## 11655 dinner vegetable turkey
+    ## 542             cat food tuna
+    ## 11685 dinner vegetable turkey
+    ## 11660 dinner vegetable turkey
+    ## 797            feast cat food
+    ## 25            cat food dinner
+    ## 736            feast cat food
+    ## 7582  dinner vegetable turkey
+    ## 7554  dinner vegetable turkey
+    ## 7574  dinner vegetable turkey
+    ## 7525            beef cat food
+    ## 550            feast cat food
 
-Nice, let's look at some rules that crosses aisles.
+Nice, we see some very high lifts, which means the rules are very significant. We modify the data such that we can graph the relationships between aisles as described by the rules.
+
+``` r
+## convert the cluster number into aisles
+aisle.rules=function(data, naisle){
+  edges=data.frame(matrix(ncol=3, nrow=0))
+  colnames(edges)=c('lhs','rhs','count')
+  for(i in 1:nrow(data)){
+    row=data[i,]
+    lhs=gsub('[{|}]', '', row$LHS)
+    lhs=as.numeric(str_split(lhs,',')[[1]])
+    lhs=lhs%/%100
+    rhs=gsub('[{|}]', '', row$RHS)
+    rhs=as.numeric(str_split(rhs,',')[[1]])
+    rhs=rhs%/%100
+    n=row$count
+    conn=data.frame(lhs=lhs, rhs=rhs, count=n)
+    edges=rbind(edges, conn)
+  }
+  edges=edges%>%group_by(lhs,rhs)%>%summarise(count=sum(count))
+  edges$lhs=aisles[edges$lhs,'aisle']
+  edges$rhs=aisles[edges$rhs,'aisle']
+  
+  aisle=edges%>%group_by(lhs)%>%summarise(n=sum(count))
+  aisle=aisle[order(aisle$n, decreasing=T)[1:naisle],]
+  
+  self.count=edges[which(edges$lhs==edges$rhs),]
+  self.count=self.count%>%group_by(lhs)%>%summarise(n=sum(count))
+  
+  edges=edges[which(edges$lhs!=edges$rhs),]
+  edges=edges[order(edges$count, decreasing=T),]
+  
+  nodes=data.frame(lhs=unique(c(edges$lhs, edges$rhs)))
+  nodes=full_join(nodes, self.count, by='lhs')
+  
+  nodes=nodes[which(nodes$lhs%in%aisle$lhs),]
+  edges=edges[which(edges$lhs%in%aisle$lhs & edges$rhs%in%aisle$lhs),]
+  return(list(edges, nodes))
+}
+test=aisle.rules(rules.frame, 20)
+edges=test[[1]]
+nodes=test[[2]]
+g=graph_from_data_frame(d=edges, vertices=nodes, directed=FALSE)
+E(g)$width=edges$count/4000
+V(g)$size=log(nodes$n)^1.3
+par(mar=c(1,1,1,1))
+plot.igraph(g, vertex.label.cex = .65, layout=layout_in_circle, edge.curved=.25, main='Association-rule-based relationship between aisles')
+```
+
+![](instacart_files/figure-markdown_github/unnamed-chunk-30-1.png)
+
+The above graph shows the most popular association rules by support. The size of the nodes means the support of rules from the aisle to itself. We got some nice connections like hot dogs/buns and canned veg/canned meals. Also beers don't seem to be relateed to anyone but themselves. It also looks like people who buys a lot of baby formula. However, wee see that a lot of the rules are from things within the same aisle such as turkey cat food -&gt; beef cat food. Let's look at some rules that crosses aisles to see if there's anything interesting.
 
 ``` r
 rule.cross.aisle=function(row){
@@ -778,34 +867,13 @@ table(rules.frame$cross.aisle)
 
     ## 
     ## FALSE  TRUE 
-    ## 13352   581
+    ## 13366   581
 
 ``` r
 cross.aisle=filter(rules.frame, cross.aisle==1)
-head(cross.aisle, 20)
+head(cross.aisle[, c('LHS.name','RHS.name')], 20)
 ```
 
-    ##                 LHS     RHS      support confidence     coverage     lift count
-    ## 1             {607} {12404} 7.074481e-05  0.3084795 2.293339e-04 410.7393   211
-    ## 2       {6909,8105}  {8920} 5.465120e-05  0.4323607 1.264019e-04 300.6617   163
-    ## 3       {9705,9715} {10502} 6.269801e-05  0.6012862 1.042732e-04 281.1801   187
-    ## 4       {6403,9807}  {9404} 7.577406e-05  0.6848485 1.106435e-04 279.8843   226
-    ## 5  {9404,9415,9807}  {6403} 5.062780e-05  0.6593886 7.677991e-05 266.8467   151
-    ## 6       {2118,5007} {12022} 1.025967e-04  0.8644068 1.186903e-04 266.1440   306
-    ## 7       {3116,3119}  {9805} 6.336857e-05  0.3339223 1.897704e-04 264.5962   189
-    ## 8       {6909,8920}  {8105} 5.465120e-05  0.3574561 1.528893e-04 260.2224   163
-    ## 9            {9705} {10502} 3.419891e-04  0.5143722 6.648671e-04 240.5364  1020
-    ## 10          {10502}  {9705} 3.419891e-04  0.1599247 2.138438e-03 240.5364  1020
-    ## 11           {9716} {10502} 1.378015e-04  0.5080346 2.712443e-04 237.5728   411
-    ## 12           {9715} {10502} 3.212015e-04  0.4940691 6.501146e-04 231.0421   958
-    ## 13          {10502}  {9715} 3.212015e-04  0.1502038 2.138438e-03 231.0421   958
-    ## 14      {9404,9807}  {6403} 7.577406e-05  0.5101580 1.485306e-04 206.4549   226
-    ## 15      {9415,9807}  {6403} 5.163365e-05  0.4516129 1.143317e-04 182.7623   154
-    ## 16 {6403,9404,9415}  {9807} 5.062780e-05  0.6113360 8.281501e-05 178.3044   151
-    ## 17      {8105,8920}  {6909} 5.465120e-05  0.7056277 7.745048e-05 170.2865   163
-    ## 18     {12022,2118}  {5007} 1.025967e-04  0.5523466 1.857470e-04 168.9296   306
-    ## 19      {4527,7810}  {1724} 1.458483e-04  0.6223176 2.343631e-04 162.3169   435
-    ## 20      {1724,4527}  {7810} 1.458483e-04  0.5234657 2.786205e-04 152.3778   435
     ##                                               LHS.name                 RHS.name
     ## 1                                 margarita lime mixer     tequila silver agave
     ## 2                  cream soup condense, bean green cut       french dress salad
@@ -827,27 +895,6 @@ head(cross.aisle, 20)
     ## 18                       vegan wedge chao, yog oh chia         fruit roll strip
     ## 19            chocolate bar milk, cracker graham honey marshmallow vanilla puff
     ## 20        marshmallow vanilla puff, chocolate bar milk     cracker graham honey
-    ##    cross.aisle
-    ## 1         TRUE
-    ## 2         TRUE
-    ## 3         TRUE
-    ## 4         TRUE
-    ## 5         TRUE
-    ## 6         TRUE
-    ## 7         TRUE
-    ## 8         TRUE
-    ## 9         TRUE
-    ## 10        TRUE
-    ## 11        TRUE
-    ## 12        TRUE
-    ## 13        TRUE
-    ## 14        TRUE
-    ## 15        TRUE
-    ## 16        TRUE
-    ## 17        TRUE
-    ## 18        TRUE
-    ## 19        TRUE
-    ## 20        TRUE
 
 Some interesting cross-aisle rules found by just scanning:
 
@@ -870,4 +917,12 @@ cross.aisle[c(49, 43, 57, 12, 380, 58),c('LHS.name','RHS.name','lift')]
     ## 380  17.61800
     ## 58   86.21966
 
-Looks like we got some lasagna, s'mores, pizza, vanilla chocolate cake, movie snacks with popcorn and chips, and gin and tonic. Those are just a few of the variety we have in the cross-aisle rules.
+Looks like we got some lasagna, s'mores, pizza, vanilla chocolate cake, movie snacks with popcorn and chips, and gin and tonic. Those are just a few of the variety we have in the cross-aisle rules. This concludes the in-depth analysis.
+
+``` r
+#write.csv(rules.frame ,'arules_all_s03_c015.csv')
+#write.csv(cross.aisle ,'arules_cross_s03_c015.csv')
+```
+
+For all the association rules, go to arules_all_s03_c015.csv
+For all the cross-aisle association rules, go to arules_cross_s03_c015.csv

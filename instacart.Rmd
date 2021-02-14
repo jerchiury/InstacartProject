@@ -4,7 +4,7 @@ author: "Jerry Chiu"
 date: "February 7, 2021"
 output:
   github_document:
-    html_preview: true
+    html_preview: false
 ---
 
 ```{r setup, include=FALSE}
@@ -39,6 +39,7 @@ library(fpc)
 library(tidyr)
 library(tidyverse)
 library(dtw)
+library(igraph)
 set.seed(1)
 options(dplyr.summarise.inform = FALSE)
 options(warn=-1)
@@ -55,7 +56,6 @@ The analysis takes the following steps:
 3. Clustering of products
 4. Mining of association rules
 5. Exploration of the association rules
-6. Summary
 
 ## 1. Data Understanding and integrity check
 
@@ -210,6 +210,7 @@ Do ppl have a tendency to order in certain day intervals? I think a log graph of
 no30=filter(orders, days_since_prior_order!=30 & !is.na(days_since_prior_order)) #removing 30 days since it is a hard cap
 test=hist(no30$days_since_prior_order, plot=F)
 plot(x=1:29, y=log(test$counts), type='line', main='logged histogram of days since prior order', xlab='days', ylab='log of frequency')
+rm(no30)
 ```
 
 Looks quite nice with the peaks at multiples of 7, and the decay after is quite predictable
@@ -548,9 +549,17 @@ transactions=read.transactions(conn, 'single', cols=c("order_id","clusters"), he
 ##transactions=read.transactions('order_transactions.csv', 'single', cols=c("order_id","clusters"), header=T, sep = ",")
 supp.min=quantile(cluster.names$prop, 0.3)
 rules=apriori(transactions, parameter = list(supp=supp.min ,conf = 0.15, target = "rules"))
+rm(transactions)
 rules.frame=DATAFRAME(rules)
 rules.frame=rules.frame[order(rules.frame$lift, decreasing=T),]
+```
 
+## Exploration of association rules
+
+We now have the rules, let's see what special things can be found. 
+
+
+```{r}
 rule.cluster.name=function(row){
   row=gsub('[{|}]', '', row)
   row=as.numeric(str_split(row, ',')[[1]])
@@ -560,10 +569,60 @@ rule.cluster.name=function(row){
 
 rules.frame$LHS.name=sapply(rules.frame$LHS, rule.cluster.name)
 rules.frame$RHS.name=sapply(rules.frame$RHS, rule.cluster.name)
-head(rules.frame)
+head(rules.frame[, c('LHS.name','RHS.name')], 20)
 ```
 
-Nice, let's look at some rules that crosses aisles. 
+Nice, we see some very high lifts, which means the rules are very significant. We modify the data such that we can graph the relationships between aisles as described by the rules. 
+
+```{r}
+## convert the cluster number into aisles
+aisle.rules=function(data, naisle){
+  edges=data.frame(matrix(ncol=3, nrow=0))
+  colnames(edges)=c('lhs','rhs','count')
+  for(i in 1:nrow(data)){
+    row=data[i,]
+    lhs=gsub('[{|}]', '', row$LHS)
+    lhs=as.numeric(str_split(lhs,',')[[1]])
+    lhs=lhs%/%100
+    rhs=gsub('[{|}]', '', row$RHS)
+    rhs=as.numeric(str_split(rhs,',')[[1]])
+    rhs=rhs%/%100
+    n=row$count
+    conn=data.frame(lhs=lhs, rhs=rhs, count=n)
+    edges=rbind(edges, conn)
+  }
+  edges=edges%>%group_by(lhs,rhs)%>%summarise(count=sum(count))
+  edges$lhs=aisles[edges$lhs,'aisle']
+  edges$rhs=aisles[edges$rhs,'aisle']
+  
+  aisle=edges%>%group_by(lhs)%>%summarise(n=sum(count))
+  aisle=aisle[order(aisle$n, decreasing=T)[1:naisle],]
+  
+  self.count=edges[which(edges$lhs==edges$rhs),]
+  self.count=self.count%>%group_by(lhs)%>%summarise(n=sum(count))
+  
+  edges=edges[which(edges$lhs!=edges$rhs),]
+  edges=edges[order(edges$count, decreasing=T),]
+  
+  nodes=data.frame(lhs=unique(c(edges$lhs, edges$rhs)))
+  nodes=full_join(nodes, self.count, by='lhs')
+  
+  nodes=nodes[which(nodes$lhs%in%aisle$lhs),]
+  edges=edges[which(edges$lhs%in%aisle$lhs & edges$rhs%in%aisle$lhs),]
+  return(list(edges, nodes))
+}
+test=aisle.rules(rules.frame, 20)
+edges=test[[1]]
+nodes=test[[2]]
+g=graph_from_data_frame(d=edges, vertices=nodes, directed=FALSE)
+E(g)$width=edges$count/4000
+V(g)$size=log(nodes$n)^1.3
+par(mar=c(1,1,1,1))
+plot.igraph(g, vertex.label.cex = .65, layout=layout_in_circle, edge.curved=.25, main='Association-rule-based relationship between aisles')
+```
+
+The above graph shows the most popular association rules by support. The size of the nodes means the support of rules from the aisle to itself. We got some nice connections like hot dogs/buns and canned veg/canned meals. Also beers don't seem to be relateed to anyone but themselves. It also looks like people who buys a lot of baby formula. 
+However, wee see that a lot of the rules are from things within the same aisle such as turkey cat food -> beef cat food. Let's look at some rules that crosses aisles to see if there's anything interesting. 
 
 ```{r}
 rule.cross.aisle=function(row){
@@ -579,9 +638,7 @@ rule.cross.aisle=function(row){
 rules.frame$cross.aisle=apply(rules.frame, 1, rule.cross.aisle)
 table(rules.frame$cross.aisle)
 cross.aisle=filter(rules.frame, cross.aisle==1)
-head(cross.aisle, 20)
-
-
+head(cross.aisle[, c('LHS.name','RHS.name')], 20)
 ```
 
 Some interesting cross-aisle rules found by just scanning:
@@ -590,5 +647,9 @@ Some interesting cross-aisle rules found by just scanning:
 cross.aisle[c(49, 43, 57, 12, 380, 58),c('LHS.name','RHS.name','lift')]
 ```
 
-Looks like we got some lasagna, s'mores, pizza, vanilla chocolate cake, movie snacks with popcorn and chips, and gin and tonic. Those are just a few of the variety we have in the cross-aisle rules. 
+Looks like we got some lasagna, s'mores, pizza, vanilla chocolate cake, movie snacks with popcorn and chips, and gin and tonic. Those are just a few of the variety we have in the cross-aisle rules. This concludes the in-depth analysis. 
 
+```{r}
+#write.csv(rules.frame ,'arules_all_s03_c015.csv')
+#write.csv(cross.aisle ,'arules_cross_s03_c015.csv')
+```

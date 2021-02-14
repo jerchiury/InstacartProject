@@ -25,6 +25,8 @@ library(fpc)
 library(tidyr)
 library(tidyverse)
 library(dtw)
+library(grid)
+library(gridExtra)
 
 set.seed(1)
 
@@ -593,5 +595,46 @@ rule.cluster.name=function(row){
   return(row)
 }
 
-
-
+## social network graph or aisles
+aisle.rules=function(data, naisle){
+  edges=data.frame(matrix(ncol=3, nrow=0))
+  colnames(edges)=c('lhs','rhs','count')
+  for(i in 1:nrow(data)){
+    row=data[i,]
+    lhs=gsub('[{|}]', '', row$LHS)
+    lhs=as.numeric(str_split(lhs,',')[[1]])
+    lhs=lhs%/%100
+    rhs=gsub('[{|}]', '', row$RHS)
+    rhs=as.numeric(str_split(rhs,',')[[1]])
+    rhs=rhs%/%100
+    n=row$count
+    conn=data.frame(lhs=lhs, rhs=rhs, count=n)
+    edges=rbind(edges, conn)
+  }
+  edges=edges%>%group_by(lhs,rhs)%>%summarise(count=sum(count))
+  edges$lhs=aisles[edges$lhs,'aisle']
+  edges$rhs=aisles[edges$rhs,'aisle']
+  
+  aisle=edges%>%group_by(lhs)%>%summarise(n=sum(count))
+  aisle=aisle[order(aisle$n, decreasing=T)[1:naisle],]
+  
+  self.count=edges[which(edges$lhs==edges$rhs),]
+  self.count=self.count%>%group_by(lhs)%>%summarise(n=sum(count))
+  
+  edges=edges[which(edges$lhs!=edges$rhs),]
+  edges=edges[order(edges$count, decreasing=T),]
+  
+  nodes=data.frame(lhs=unique(c(edges$lhs, edges$rhs)))
+  nodes=full_join(nodes, self.count, by='lhs')
+  
+  nodes=nodes[which(nodes$lhs%in%aisle$lhs),]
+  edges=edges[which(edges$lhs%in%aisle$lhs & edges$rhs%in%aisle$lhs),]
+  return(list(edges, nodes))
+}
+test=aisle.rules(rules.frame, 20)
+edges=test[[1]]
+nodes=test[[2]]
+g=graph_from_data_frame(d=edges, vertices=nodes, directed=FALSE)
+E(g)$width=edges$count/3000
+V(g)$size=log(nodes$n)
+plot.igraph(g, vertex.label.cex = .75, layout=layout_as_star)
